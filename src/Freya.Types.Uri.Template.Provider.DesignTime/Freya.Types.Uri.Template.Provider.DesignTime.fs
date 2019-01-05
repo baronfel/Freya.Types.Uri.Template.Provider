@@ -42,34 +42,26 @@ type FreyaUriTemplateProvider(config: TypeProviderConfig) as this =
 
     let tryAddTemplateParameter template (ty: ProvidedTypeDefinition) =
 
-        let makeConstructor (template: UriTemplate) =
-            let ctor = ProvidedConstructor([],  fun _ -> <@@ () @@>)
-            ctor.BaseConstructorCall <- 
-                let baseCtor = typeof<RuntimeContext>.GetConstructors() |> Array.head
-                fun _ -> baseCtor, [Expr.Value template]
-            ctor
-
         let makeTemplateMember (template: UriTemplate) =
-            let m = ProvidedProperty("Template", typeof<UriTemplate>, (fun [self] -> <@@ (%%self: RuntimeContext).Template @@>))
+            let m = ProvidedProperty("Template", typeof<UriTemplate>, getterCode = (fun _ -> Expr.Value(template, typeof<UriTemplate>)))
             m.AddXmlDoc (sprintf "The parsed UriTemplate for the source string.'%O'" template)
             m
         
-        // let makeRenderMember (template: UriTemplate) = 
-        //     let m = ProvidedProperty("Render", typeof<UriTemplateData -> string>, (fun _ -> <@@ RuntimeContext(template).Render @@>), isStatic = true)
-        //     m.AddXmlDoc (sprintf "Render the template '%O' with a data bundle." template)
-        //     m
+        let makeRenderMember (template: UriTemplate) = 
+            let m = ProvidedProperty("Render", typeof<UriTemplateData -> string>, (fun _ -> <@@ template.Render @@>), isStatic = true)
+            m.AddXmlDoc (sprintf "Render the template '%O' with a data bundle." template)
+            m
 
-        // let makeMatchMember (template: UriTemplate) = 
-        //     let m = ProvidedProperty("Match", typeof<string -> UriTemplateData>, (fun _ -> <@@ RuntimeContext(template).Render @@>), isStatic = true)
-        //     m.AddXmlDoc (sprintf "Render the template '%O' with a data bundle." template)
-        //     m
+        let makeMatchMember (template: UriTemplate) = 
+            let m = ProvidedProperty("Match", typeof<string -> UriTemplateData>, (fun _ -> <@@ template.Match @@>), isStatic = true)
+            m.AddXmlDoc (sprintf "Render the template '%O' with a data bundle." template)
+            m
 
         match UriTemplate.tryParse template with
         | Ok template ->
-            ty.AddMember (makeConstructor template)
             ty.AddMember (makeTemplateMember template)
-            // ty.AddMember (makeRenderMember template)
-            // ty.AddMember (makeMatchMember template)
+            ty.AddMember (makeRenderMember template)
+            ty.AddMember (makeMatchMember template)
             ty
         | Error parseError ->
             failwithf "Error parsing template '%s':\n\t%s" template parseError
