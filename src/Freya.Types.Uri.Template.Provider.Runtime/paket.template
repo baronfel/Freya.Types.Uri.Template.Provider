@@ -1,0 +1,39 @@
+type file
+id Freya.Types.Uri.Template.Provider
+authors
+    Steffen Forkmann, Gustavo Guerra, JohnDoeKyrgyz, Don Syme
+owners
+    Steffen Forkmann, Gustavo Guerra, JohnDoeKyrgyz, Don Syme
+projectUrl
+    http://github.com/fsprojects/Freya.Types.Uri.Template.Provider
+iconUrl
+    https://raw.githubusercontent.com/fsprojects/Freya.Types.Uri.Template.Provider/master/docs/files/img/logo.png
+licenseUrl
+    http://github.com/fsprojects/Freya.Types.Uri.Template.Provider/blob/master/LICENSE.txt
+requireLicenseAcceptance
+    false
+tags
+    F# fsharp typeproviders Freya.Types.Uri.Template.Provider
+summary
+    This library is for the .NET platform implementing Freya.Types.Uri.Template.Provider.
+description
+    This library is for the .NET platform implementing Freya.Types.Uri.Template.Provider.
+tags
+    F# fsharp typeproviders Freya.Types.Uri.Template.Provider
+files
+    bin/Release/net45/Freya.Types.Uri.Template.Provider.Runtime.* ==> lib/net45
+    bin/Release/netstandard2.0/Freya.Types.Uri.Template.Provider.Runtime.* ==> lib/netstandard2.0
+    bin/Release/typeproviders/fsharp41/netstandard2.0/*.dll ==> typeproviders/fsharp41/netstandard2.0
+    bin/Release/typeproviders/fsharp41/netcoreapp2.0/*.dll ==> typeproviders/fsharp41/netcoreapp2.0
+    bin/Release/typeproviders/fsharp41/net45/*.dll ==> typeproviders/fsharp41/net45
+references
+    Freya.Types.Uri.Template.Provider.Runtime.dll
+dependencies
+  FSharp.Core >= LOCKEDVERSION
+
+# put any package references here
+#  Some.Package
+#  framework: netcoreapp2.0
+#    System.Text.Encoding.CodePages >= LOCKEDVERSION
+#  framework: netstandard2.0
+#    System.Text.Encoding.CodePages >= LOCKEDVERSION
