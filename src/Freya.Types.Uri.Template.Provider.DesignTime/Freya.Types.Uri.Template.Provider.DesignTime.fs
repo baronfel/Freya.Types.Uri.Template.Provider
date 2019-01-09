@@ -6,12 +6,13 @@ open System.IO
 open System.Reflection
 open FSharp.Quotations
 open FSharp.Core.CompilerServices
-open MyNamespace
 open ProviderImplementation
 open ProviderImplementation.ProvidedTypes
 open Freya.Types.Uri.Template
+open Freya.Types.Uri.Template.Runtime
 open System.Diagnostics
 open ProviderImplementation.ProvidedTypes
+open Freya.Types.Uri.Template.Obsolete
 
 // Put any utility helpers here
 [<AutoOpen>]
@@ -40,28 +41,28 @@ type FreyaUriTemplateProvider(config: TypeProviderConfig) as this =
 
     //TODO: check we contain a copy of runtime files, and are not referencing the runtime DLL
 
-    let tryAddTemplateParameter template (ty: ProvidedTypeDefinition) =
-
-        let makeTemplateMember (template: UriTemplate) =
-            let m = ProvidedProperty("Template", typeof<UriTemplate>, getterCode = (fun _ -> Expr.Value(template, typeof<UriTemplate>)))
-            m.AddXmlDoc (sprintf "The parsed UriTemplate for the source string.'%O'" template)
-            m
-        
-        let makeRenderMember (template: UriTemplate) = 
-            let m = ProvidedProperty("Render", typeof<UriTemplateData -> string>, (fun _ -> <@@ template.Render @@>), isStatic = true)
-            m.AddXmlDoc (sprintf "Render the template '%O' with a data bundle." template)
+    let tryAddTemplateParameter (template: string) (ty: ProvidedTypeDefinition) =    
+        let makeTemplateMember () =
+            let m = ProvidedProperty("Template", typeof<UriTemplate>, getterCode = (fun _ -> <@@ UriTemplate.parse (RuntimeHelpers.getTemplateString ty) @@>), isStatic = true)
+            m.AddXmlDoc (sprintf "The parsed UriTemplate for the source string.'%s'" template)
             m
 
-        let makeMatchMember (template: UriTemplate) = 
-            let m = ProvidedProperty("Match", typeof<string -> UriTemplateData>, (fun _ -> <@@ template.Match @@>), isStatic = true)
-            m.AddXmlDoc (sprintf "Render the template '%O' with a data bundle." template)
+        let makeRenderMember () =
+            let m = ProvidedProperty("Render", typeof<UriTemplateData -> string>, (fun _ -> <@@ (RuntimeHelpers.getUriTemplate ty).Render @@>), isStatic = true)
+            m.AddXmlDoc (sprintf "Render the template '%s' with a data bundle." template)
             m
 
+        let makeMatchMember () =
+            let m = ProvidedProperty("Match", typeof<string -> UriTemplateData>, (fun _ -> <@@ (RuntimeHelpers.getUriTemplate ty).Match @@>), isStatic = true)
+            m.AddXmlDoc (sprintf "Get the match data for the route '%s'" template)
+            m
+
+        ty.AddMember (ProvidedField.Literal("template", typeof<string>, template))
         match UriTemplate.tryParse template with
         | Ok template ->
-            ty.AddMember (makeTemplateMember template)
-            ty.AddMember (makeRenderMember template)
-            ty.AddMember (makeMatchMember template)
+            ty.AddMember (makeTemplateMember ())
+            ty.AddMember (makeRenderMember ())
+            ty.AddMember (makeMatchMember ())
             ty
         | Error parseError ->
             failwithf "Error parsing template '%s':\n\t%s" template parseError
@@ -71,16 +72,16 @@ type FreyaUriTemplateProvider(config: TypeProviderConfig) as this =
         providedType
 
     let createTemplateType (typeName: string) ([| StringParam uriTemplate |]) =
-        try 
+        try
             let innerAssembly = ProvidedAssembly()
-            let ty = 
-                ProvidedTypeDefinition(innerAssembly, ``namespace``, typeName, Some typeof<RuntimeContext>, isErased = false)
+            let ty =
+                ProvidedTypeDefinition(innerAssembly, ``namespace``, typeName, Some typeof<obj>, isErased = false)
                 |> tryAddTemplateParameter uriTemplate
                 |> addTypeDocs uriTemplate
             innerAssembly.AddTypes [ty]
             ty
-        with e -> 
-            File.AppendAllText("/Users/chethusk/compilelog.log", 
+        with e ->
+            File.AppendAllText("/Users/chethusk/compilelog.log",
                 sprintf """error while creating type: %s\n\t:%s""" e.Message e.StackTrace
             )
             reraise ()
@@ -94,10 +95,10 @@ type FreyaUriTemplateProvider(config: TypeProviderConfig) as this =
         ty
 
     do
-        try 
-            this.AddNamespace(``namespace``, [ providerType ])        
-        with e -> 
-            File.AppendAllText("/Users/chethusk/compilelog.log", 
+        try
+            this.AddNamespace(``namespace``, [ providerType ])
+        with e ->
+            File.AppendAllText("/Users/chethusk/compilelog.log",
                 sprintf """error while creating type: %s\n\t:%s""" e.Message e.StackTrace
             )
             reraise ()

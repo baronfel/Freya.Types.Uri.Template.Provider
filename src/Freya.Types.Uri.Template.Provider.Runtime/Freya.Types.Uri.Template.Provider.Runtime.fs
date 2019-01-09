@@ -1,14 +1,15 @@
-namespace MyNamespace
+namespace Freya.Types.Uri.Template.Runtime
 
 open System
 open Freya.Types.Uri.Template
+open System.Reflection
 
-// Put any runtime constructs here
-type RuntimeContext (template: UriTemplate) =
-    member __.Template = template
-    member __.Render data = template.Render data
-    member __.Match uri = template.Match uri
-    override __.ToString() = string template
+module RuntimeHelpers = 
+    let getTemplateString (ty: Type) =
+        ty.GetField("template").GetValue(null) :?> string
+
+    let getUriTemplate (ty: Type) = 
+        ty.GetProperty("Template", BindingFlags.Static ||| BindingFlags.Public).GetValue(null) :?> UriTemplate
 
 // Put the TypeProviderAssemblyAttribute in the runtime DLL, pointing to the design-time DLL
 [<assembly:CompilerServices.TypeProviderAssembly("Freya.Types.Uri.Template.Provider.DesignTime.dll")>]
