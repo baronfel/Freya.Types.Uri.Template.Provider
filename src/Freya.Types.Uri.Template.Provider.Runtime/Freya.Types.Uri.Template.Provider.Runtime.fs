@@ -6,7 +6,8 @@ open System.Reflection
 
 module RuntimeHelpers = 
     let getTemplateString (ty: Type) =
-        ty.GetField("template").GetValue(null) :?> string
+        // would ideally be private
+        ty.GetField("template", (* BindingFlags.NonPublic ||| *) BindingFlags.Static).GetValue(null) :?> string
 
     let getUriTemplate (ty: Type) = 
         ty.GetProperty("Template", BindingFlags.Static ||| BindingFlags.Public).GetValue(null) :?> UriTemplate

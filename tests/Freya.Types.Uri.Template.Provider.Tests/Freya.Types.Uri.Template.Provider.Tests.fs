@@ -8,8 +8,6 @@ type SimpleTemplate = TemplateProvider<"/foo">
 
 [<Test>]
 let ``Can access simple uri template with prop`` () = 
-    let tmpl = SimpleTemplate.template |> UriTemplate.parse
-    Assert.AreEqual(tmpl, SimpleTemplate.Template)
     let rendered = SimpleTemplate.Render (UriTemplateData.UriTemplateData Map.empty)
     Assert.AreEqual(rendered, "/foo")
 

@@ -42,25 +42,27 @@ type FreyaUriTemplateProvider(config: TypeProviderConfig) as this =
     //TODO: check we contain a copy of runtime files, and are not referencing the runtime DLL
 
     let tryAddTemplateParameter (template: string) (ty: ProvidedTypeDefinition) =    
-        let makeTemplateMember () =
+        let makeTemplateMembers (): MemberInfo list = [
+            yield ProvidedField.Literal("template", typeof<string>, template, isPublic = false) :> _
+
             let m = ProvidedProperty("Template", typeof<UriTemplate>, getterCode = (fun _ -> <@@ UriTemplate.parse (RuntimeHelpers.getTemplateString ty) @@>), isStatic = true)
             m.AddXmlDoc (sprintf "The parsed UriTemplate for the source string.'%s'" template)
-            m
+            yield m
+        ]
 
         let makeRenderMember () =
-            let m = ProvidedProperty("Render", typeof<UriTemplateData -> string>, (fun _ -> <@@ (RuntimeHelpers.getUriTemplate ty).Render @@>), isStatic = true)
+            let m = ProvidedProperty("Render", typeof<UriTemplateData -> string>, getterCode = (fun _ -> <@@ (RuntimeHelpers.getUriTemplate ty).Render @@>), isStatic = true)
             m.AddXmlDoc (sprintf "Render the template '%s' with a data bundle." template)
             m
 
         let makeMatchMember () =
-            let m = ProvidedProperty("Match", typeof<string -> UriTemplateData>, (fun _ -> <@@ (RuntimeHelpers.getUriTemplate ty).Match @@>), isStatic = true)
+            let m = ProvidedProperty("Match", typeof<string -> UriTemplateData>, getterCode = (fun _ -> <@@ (RuntimeHelpers.getUriTemplate ty).Match @@>), isStatic = true)
             m.AddXmlDoc (sprintf "Get the match data for the route '%s'" template)
             m
 
-        ty.AddMember (ProvidedField.Literal("template", typeof<string>, template))
         match UriTemplate.tryParse template with
         | Ok template ->
-            ty.AddMember (makeTemplateMember ())
+            ty.AddMembers (makeTemplateMembers ())
             ty.AddMember (makeRenderMember ())
             ty.AddMember (makeMatchMember ())
             ty
