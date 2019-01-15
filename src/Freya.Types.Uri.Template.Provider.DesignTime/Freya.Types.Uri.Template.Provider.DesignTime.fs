@@ -59,7 +59,7 @@ module UriTemplate =
     let pathParts template = 
         let getSpecName (spec: VariableSpec) = 
             match spec with
-            | VariableSpec(VariableName name, modifier) -> name
+            | VariableSpec(VariableName name, modifier) -> name, modifier
 
         let getListNames (specs: VariableSpec list) = 
             match specs with
@@ -97,8 +97,12 @@ type FreyaUriTemplateProvider(config: TypeProviderConfig) as this =
                 None
             | pathParts -> 
                 let renderTy = ProvidedTypeDefinition("RouteParameters", baseType = None, hideObjectMethods = true, nonNullable = true, isErased = false, isSealed = true)
-                for name in pathParts do
-                    let field, prop = ProvidedProperty.InstancePropertyWithBackingField(name, typeof<string>)
+                for name, modifier in pathParts do
+                    let baseType = 
+                        match modifier with 
+                        | Some(Modifier.Level4(ModifierLevel4.Explode)) -> typeof<string list>
+                        | _ -> typeof<string>
+                    let field, prop = ProvidedProperty.InstancePropertyWithBackingField(name, baseType)
                     renderTy.AddMember field
                     renderTy.AddMember prop
                     Logging.logfn "added '%s' property" name
