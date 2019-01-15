@@ -14,6 +14,8 @@ open System.Diagnostics
 open ProviderImplementation.ProvidedTypes
 open Freya.Types.Uri.Template.Obsolete
 open Freya.Types.Uri.Template.Obsolete
+open Freya.Types.Uri.Template.Obsolete
+open Freya.Types.Uri.Template.Obsolete
 
 // Put any utility helpers here
 [<AutoOpen>]
@@ -81,20 +83,27 @@ type FreyaUriTemplateProvider(config: TypeProviderConfig) as this =
     /// Creates the backing storage field for the `UriTemplate` instance represented by the template `template`
     /// This field is attached to the type and a getter is returned for external usage.
     /// In an ideal world I'd find a way to set this value in a static constructor, so that we could skip the `isNull` check
-    let makeBackingField template (ty: ProvidedTypeDefinition): Expr<UriTemplate> =
+    let makeBackingField template (ty: ProvidedTypeDefinition) =
         let templateField = ProvidedField("Template", typeof<UriTemplate>)
         templateField.SetFieldAttributes FieldAttributes.Static
         templateField.AddXmlDoc (sprintf "The parsed UriTemplate for the source string.'%s'" template)
         ty.AddMember templateField
         Logging.logfn "Created backing field"
 
-        <@ 
-            let uriTemplate = (%%Expr.FieldGet templateField : UriTemplate)
-            if isNull (box uriTemplate) then
+        let getter = <@ %%Expr.FieldGet templateField : UriTemplate @>
+
+        (getter, templateField)
+
+    /// Creates a static constructor to initialize the backing UriTemplate field to a known-good value.
+    /// This is done so that we don't have to check for the existence on each of the property accessors.
+    let createStaticConstructor templateStr field  (ty: ProvidedTypeDefinition) =
+        let ctorCode args = 
+            <@ 
                 Logging.logfn "Initializing field"
-                %%Expr.FieldSet(templateField, <@ UriTemplate.parse template @>.Raw)
-            (%%Expr.FieldGet templateField : UriTemplate)
-        @>
+                %%Expr.FieldSet(field, <@ UriTemplate.parse templateStr @>)
+            @>.Raw
+        let ctor = ProvidedConstructor([], invokeCode = ctorCode, IsTypeInitializer=true)
+        ty.AddMember ctor
 
     /// Creates a property called `Render` on the provided type. 
     /// This property will take some input route data and return the route template populated with that data as a string
@@ -122,7 +131,8 @@ type FreyaUriTemplateProvider(config: TypeProviderConfig) as this =
     let addMembers (template: string) (ty: ProvidedTypeDefinition) = // (renderTy: ProvidedTypeDefinition) =    
         match UriTemplate.tryParse template with
         | Ok uriTemplate ->
-            let backingField = makeBackingField template ty            
+            let backingField, fieldInfo = makeBackingField template ty
+            createStaticConstructor template backingField fieldInfo ty
             createRenderProperty template backingField ty
             createMatchProperty template backingField ty
 
