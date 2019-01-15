@@ -13,6 +13,7 @@ open Freya.Types.Uri.Template.Runtime
 open System.Diagnostics
 open ProviderImplementation.ProvidedTypes
 open Freya.Types.Uri.Template.Obsolete
+open Freya.Types.Uri.Template.Obsolete
 
 // Put any utility helpers here
 [<AutoOpen>]
@@ -40,7 +41,9 @@ type FreyaUriTemplateProvider(config: TypeProviderConfig) as this =
     let hostAssembly = Assembly.GetExecutingAssembly()
 
     //TODO: check we contain a copy of runtime files, and are not referencing the runtime DLL
-
+    
+    /// Create a type that will be used to make `Render` typed, by inspecting the URI template provided and 
+    /// making a type whose properties are the named segments of the template.
     let createRenderType (template: string) = 
         match UriTemplate.tryParse template with
         | Ok uriTemplate -> 
@@ -75,84 +78,82 @@ type FreyaUriTemplateProvider(config: TypeProviderConfig) as this =
             Logging.logfn "Error parsing template '%s':\n\t%s" template parseError
             failwith (string parseError)
 
+    /// Creates the backing storage field for the `UriTemplate` instance represented by the template `template`
+    /// This field is attached to the type and a getter is returned for external usage.
+    /// In an ideal world I'd find a way to set this value in a static constructor, so that we could skip the `isNull` check
+    let makeBackingField template (ty: ProvidedTypeDefinition): Expr<UriTemplate> =
+        let templateField = ProvidedField("Template", typeof<UriTemplate>)
+        templateField.SetFieldAttributes FieldAttributes.Static
+        templateField.AddXmlDoc (sprintf "The parsed UriTemplate for the source string.'%s'" template)
+        ty.AddMember templateField
+        Logging.logfn "Created backing field"
+
+        <@ 
+            let uriTemplate = (%%Expr.FieldGet templateField : UriTemplate)
+            if isNull (box uriTemplate) then
+                Logging.logfn "Initializing field"
+                %%Expr.FieldSet(templateField, <@ UriTemplate.parse template @>.Raw)
+            (%%Expr.FieldGet templateField : UriTemplate)
+        @>
+
+    /// Creates a property called `Render` on the provided type. 
+    /// This property will take some input route data and return the route template populated with that data as a string
+    let createRenderProperty template (getTemplateExpr: Expr<UriTemplate>) (ty: ProvidedTypeDefinition) = 
+        let renderProp = ProvidedProperty("Render",
+                                          typeof<UriTemplateData -> string>,
+                                          getterCode = (fun _ -> <@ (%getTemplateExpr).Render @>.Raw), 
+                                          isStatic = true)
+        renderProp.AddXmlDoc (sprintf "Render the template '%s' with a data bundle." template)
+        ty.AddMember renderProp
+        Logging.logfn "Made Render prop"
+
+    /// Creates a property called `Match` on the provided type.
+    /// This property will take an input route and determine if a given route satisfies the route template.
+    let createMatchProperty template (getTemplateExpr: Expr<UriTemplate>) (ty: ProvidedTypeDefinition) =
+        let matchProp = ProvidedProperty("Match",
+                                         typeof<string -> UriTemplateData>,
+                                         getterCode = (fun _ -> <@ (%getTemplateExpr).Match @>.Raw),
+                                         isStatic = true)
+        matchProp.AddXmlDoc (sprintf "Get the match data for the route '%s'" template)
+        ty.AddMember matchProp
+        Logging.logfn "Made Match prop"
+
+    /// Parse the route template, and if it is a valid route generate the type for the checked helper properties
     let addMembers (template: string) (ty: ProvidedTypeDefinition) = // (renderTy: ProvidedTypeDefinition) =    
         match UriTemplate.tryParse template with
         | Ok uriTemplate ->
-            let templateField = ProvidedField("Template", typeof<UriTemplate>)
-            templateField.SetFieldAttributes FieldAttributes.Static
-            templateField.AddXmlDoc (sprintf "The parsed UriTemplate for the source string.'%s'" template)
-            ty.AddMember templateField
-            
-            let templateExpr = <@ template @>
-            let ensureTemplateField = 
-                <@ 
-                    let uriTemplate = (%%Expr.FieldGet templateField : UriTemplate)
-                    if isNull (box uriTemplate) then
-                        Logging.logfn "Initializing field"
-                        let template' = UriTemplate.parse %templateExpr
-                        Logging.logfn "Got template"
-                        %%Expr.FieldSet(templateField, <@ UriTemplate.parse template @>.Raw)
+            let backingField = makeBackingField template ty            
+            createRenderProperty template backingField ty
+            createMatchProperty template backingField ty
 
-                    (%%Expr.FieldGet templateField : UriTemplate)
-                @>
-            Logging.logfn "Created backing field"
-            
-            // let renderTy = 
-            //     let fnTy = typedefof<string -> bool>
-            //     fnTy.MakeGenericType [| renderTy :> Type; typeof<string> |]
-
-            let renderProp = ProvidedProperty("Render",
-                                              typeof<UriTemplateData -> string>,
-                                              getterCode = (fun _ -> <@ (%ensureTemplateField).Render @>.Raw), 
-                                              isStatic = true)
-            renderProp.AddXmlDoc (sprintf "Render the template '%s' with a data bundle." template)
-            ty.AddMember renderProp
-            Logging.logfn "Made Render prop"
-
-            let matchProp = ProvidedProperty("Match",
-                                             typeof<string -> UriTemplateData>,
-                                             getterCode = (fun _ -> <@ (%ensureTemplateField).Match @>.Raw),
-                                             isStatic = true)
-            matchProp.AddXmlDoc (sprintf "Get the match data for the route '%s'" template)
-            ty.AddMember matchProp
-            Logging.logfn "Made Match prop"
-            ty
         | Error parseError ->
             Logging.logfn "Error parsing template '%s':\n\t%s" template parseError
             failwithf "Error parsing template '%s':\n\t%s" template parseError
-
-    let addTypeDocs template (providedType: ProvidedTypeDefinition) =
-        providedType.AddXmlDoc (sprintf "A typechecked version of the URI Template '%s'" template)
-        providedType
-
+    
+    /// Try to create a type from the static parameters provided to us.
     let createTemplateType (typeName: string) ([| StringParam uriTemplate |]) =
+        // We must make a dummy assembly for our types to live in.
+        // This types written to the assembly will be injected into the Assembly that calls the type provider
         let innerAssembly = ProvidedAssembly()
         Logging.logfn "making type %s" typeName
-        let templateTy = ProvidedTypeDefinition(innerAssembly, ``namespace``, typeName, Some typeof<obj>, isErased = false)
-        //let renderTy = createRenderType uriTemplate 
-        let ty =
-            templateTy
-            |> addMembers uriTemplate// renderTy
-            |> addTypeDocs uriTemplate
-        //ty.AddMember renderTy
-        innerAssembly.AddTypes [ty]
+        // We're making a Generated Type whose name is based off of the `type XXXX = TemplateProvide<"">` expression that the user used.
+        let templateType = ProvidedTypeDefinition(innerAssembly, ``namespace``, typeName, Some typeof<obj>, isErased = false)
+        templateType.AddXmlDoc (sprintf "A typechecked version of the URI Template '%s'" uriTemplate)
+        addMembers uriTemplate templateType
+        // once our types are structured we must add them to the parent assembly, or else thye won't be discovered
+        innerAssembly.AddTypes [templateType]
+        templateType
+
+    let providerType =
+        let ty = ProvidedTypeDefinition(hostAssembly, ``namespace``, "TemplateProvider", Some typeof<obj>, isErased = false)
+        ty.DefineStaticParameters(
+            [requiredStaticParameter<string> "template" "The URI Template (per the [URI Template spec](https://tools.ietf.org/html/rfc6570)) for which to generate a type"],
+            createTemplateType
+        )
         ty
-
+    
     do
-        try
-            let providerType =
-                let ty = ProvidedTypeDefinition(hostAssembly, ``namespace``, "TemplateProvider", Some typeof<obj>, isErased = false)
-                ty.DefineStaticParameters(
-                    [requiredStaticParameter<string> "template" "The URI Template (per the [URI Template spec](https://tools.ietf.org/html/rfc6570)) for which to generate a type"],
-                    createTemplateType
-                )
-                ty
-
-            this.AddNamespace(``namespace``, [ providerType ])
-        with e ->
-            Logging.logfn """error while creating type: %s\n\t:%s""" e.Message e.StackTrace
-            reraise ()
+        this.AddNamespace(``namespace``, [ providerType ])
 
 [<TypeProviderAssembly>]
-do
-  ProvidedTypeDefinition.Logger.Value <- Some (fun str -> File.AppendAllText("/Users/chethusk/compilelog.log", str))
+do ()
