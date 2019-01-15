@@ -41,29 +41,73 @@ type FreyaUriTemplateProvider(config: TypeProviderConfig) as this =
 
     //TODO: check we contain a copy of runtime files, and are not referencing the runtime DLL
 
-    let addMembers (template: string) (ty: ProvidedTypeDefinition) =    
+    let createRenderType (template: string) = 
+        match UriTemplate.tryParse template with
+        | Ok uriTemplate -> 
+            let variableParts = 
+                let getSpecName (spec: VariableSpec) = 
+                    match spec with
+                    | VariableSpec(VariableName name, modifier) -> name
+
+                let getListNames (specs: VariableSpec list) = 
+                    match specs with
+                    | [] -> None
+                    | specs -> specs |> List.map getSpecName |> Some
+
+                let getNamesFromExpression (Expression(operator, variables)) = 
+                    match variables with
+                    | VariableList list -> getListNames list
+
+                let getPartNames (part: UriTemplatePart) = 
+                    match part with
+                    | UriTemplatePart.Literal _ -> None
+                    | UriTemplatePart.Expression e -> getNamesFromExpression e
+                match uriTemplate with
+                | UriTemplate.UriTemplate parts -> parts |> List.choose getPartNames |> List.collect id
+
+            let renderTy = ProvidedTypeDefinition("RouteParameters", baseType = None, hideObjectMethods = true, nonNullable = true, isErased = false, isSealed = true)
+            for name in variableParts do
+                renderTy.AddMember(ProvidedField.Literal(name, typeof<string>, name))
+            renderTy.AddMember (ProvidedConstructor([], (fun _ -> <@ () @>.Raw)))
+            Logging.logfn "Made RouteParameters type"
+            renderTy
+        | Error parseError ->
+            Logging.logfn "Error parsing template '%s':\n\t%s" template parseError
+            failwith (string parseError)
+
+    let addMembers (template: string) (ty: ProvidedTypeDefinition) = // (renderTy: ProvidedTypeDefinition) =    
         match UriTemplate.tryParse template with
         | Ok uriTemplate ->
-
             let templateField = ProvidedField("Template", typeof<UriTemplate>)
             templateField.SetFieldAttributes FieldAttributes.Static
             templateField.AddXmlDoc (sprintf "The parsed UriTemplate for the source string.'%s'" template)
             ty.AddMember templateField
             
+            let templateExpr = <@ template @>
             let ensureTemplateField = 
                 <@ 
                     let uriTemplate = (%%Expr.FieldGet templateField : UriTemplate)
                     if isNull (box uriTemplate) then
+                        Logging.logfn "Initializing field"
+                        let template' = UriTemplate.parse %templateExpr
+                        Logging.logfn "Got template"
                         %%Expr.FieldSet(templateField, <@ UriTemplate.parse template @>.Raw)
+
                     (%%Expr.FieldGet templateField : UriTemplate)
                 @>
+            Logging.logfn "Created backing field"
+            
+            // let renderTy = 
+            //     let fnTy = typedefof<string -> bool>
+            //     fnTy.MakeGenericType [| renderTy :> Type; typeof<string> |]
 
-            let renderProp = ProvidedProperty("Render", 
-                                              typeof<UriTemplateData -> string>, 
+            let renderProp = ProvidedProperty("Render",
+                                              typeof<UriTemplateData -> string>,
                                               getterCode = (fun _ -> <@ (%ensureTemplateField).Render @>.Raw), 
                                               isStatic = true)
             renderProp.AddXmlDoc (sprintf "Render the template '%s' with a data bundle." template)
             ty.AddMember renderProp
+            Logging.logfn "Made Render prop"
 
             let matchProp = ProvidedProperty("Match",
                                              typeof<string -> UriTemplateData>,
@@ -71,8 +115,10 @@ type FreyaUriTemplateProvider(config: TypeProviderConfig) as this =
                                              isStatic = true)
             matchProp.AddXmlDoc (sprintf "Get the match data for the route '%s'" template)
             ty.AddMember matchProp
+            Logging.logfn "Made Match prop"
             ty
         | Error parseError ->
+            Logging.logfn "Error parsing template '%s':\n\t%s" template parseError
             failwithf "Error parsing template '%s':\n\t%s" template parseError
 
     let addTypeDocs template (providedType: ProvidedTypeDefinition) =
@@ -80,35 +126,31 @@ type FreyaUriTemplateProvider(config: TypeProviderConfig) as this =
         providedType
 
     let createTemplateType (typeName: string) ([| StringParam uriTemplate |]) =
-        try
-            let innerAssembly = ProvidedAssembly()
-            let ty =
-                ProvidedTypeDefinition(innerAssembly, ``namespace``, typeName, Some typeof<obj>, isErased = false)
-                |> addMembers uriTemplate
-                |> addTypeDocs uriTemplate
-            innerAssembly.AddTypes [ty]
-            ty
-        with e ->
-            File.AppendAllText("/Users/chethusk/compilelog.log",
-                sprintf """error while creating type: %s\n\t:%s""" e.Message e.StackTrace
-            )
-            reraise ()
-
-    let providerType =
-        let ty = ProvidedTypeDefinition(hostAssembly, ``namespace``, "TemplateProvider", Some typeof<obj>, isErased = false)
-        ty.DefineStaticParameters(
-            [requiredStaticParameter<string> "template" "The URI Template (per the [URI Template spec](https://tools.ietf.org/html/rfc6570)) for which to generate a type"],
-            createTemplateType
-        )
+        let innerAssembly = ProvidedAssembly()
+        Logging.logfn "making type %s" typeName
+        let templateTy = ProvidedTypeDefinition(innerAssembly, ``namespace``, typeName, Some typeof<obj>, isErased = false)
+        //let renderTy = createRenderType uriTemplate 
+        let ty =
+            templateTy
+            |> addMembers uriTemplate// renderTy
+            |> addTypeDocs uriTemplate
+        //ty.AddMember renderTy
+        innerAssembly.AddTypes [ty]
         ty
 
     do
         try
+            let providerType =
+                let ty = ProvidedTypeDefinition(hostAssembly, ``namespace``, "TemplateProvider", Some typeof<obj>, isErased = false)
+                ty.DefineStaticParameters(
+                    [requiredStaticParameter<string> "template" "The URI Template (per the [URI Template spec](https://tools.ietf.org/html/rfc6570)) for which to generate a type"],
+                    createTemplateType
+                )
+                ty
+
             this.AddNamespace(``namespace``, [ providerType ])
         with e ->
-            File.AppendAllText("/Users/chethusk/compilelog.log",
-                sprintf """error while creating type: %s\n\t:%s""" e.Message e.StackTrace
-            )
+            Logging.logfn """error while creating type: %s\n\t:%s""" e.Message e.StackTrace
             reraise ()
 
 [<TypeProviderAssembly>]
