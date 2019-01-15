@@ -90,9 +90,7 @@ type FreyaUriTemplateProvider(config: TypeProviderConfig) as this =
         ty.AddMember templateField
         Logging.logfn "Created backing field"
 
-        let getter = <@ %%Expr.FieldGet templateField : UriTemplate @>
-
-        (getter, templateField)
+        templateField
 
     /// Creates a static constructor to initialize the backing UriTemplate field to a known-good value.
     /// This is done so that we don't have to check for the existence on each of the property accessors.
@@ -131,10 +129,11 @@ type FreyaUriTemplateProvider(config: TypeProviderConfig) as this =
     let addMembers (template: string) (ty: ProvidedTypeDefinition) = // (renderTy: ProvidedTypeDefinition) =    
         match UriTemplate.tryParse template with
         | Ok uriTemplate ->
-            let backingField, fieldInfo = makeBackingField template ty
-            createStaticConstructor template backingField fieldInfo ty
-            createRenderProperty template backingField ty
-            createMatchProperty template backingField ty
+            let backingField = makeBackingField template ty
+            let backingFieldGetter = <@ %%Expr.FieldGet backingField : UriTemplate @>
+            createStaticConstructor template backingField ty
+            createRenderProperty template backingFieldGetter ty
+            createMatchProperty template backingFieldGetter ty
 
         | Error parseError ->
             Logging.logfn "Error parsing template '%s':\n\t%s" template parseError
